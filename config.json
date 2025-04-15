@@ -1,6 +1,6 @@
 {
-    "title":"爱捣鼓的小水木的博客（测试版）",
-    "subTitle":"测试版",
+    "title":"Gmeek增强版",
+    "subTitle":"可以从任何复制直接复制markdown到stackedit(注意：把你的git的issues目录关联到stackedit),当检测到issues目录有更新时，会自动将文档同步到Github的ISSUES中，调用Gmeek来发布博客。",
     "avatarUrl":"https://github.githubassets.com/favicons/favicon.svg",
     "GMEEK_VERSION":"last"
 }

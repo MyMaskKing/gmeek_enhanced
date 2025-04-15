@@ -1,0 +1,284 @@
+name: Publish Issues
+
+on:
+  push:
+    paths:
+      - 'issues/*.md'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  issue-publisher:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 2  # 确保获取足够的历史记录比较变更
+
+      - name: 📂 获取本次提交变更的 issues/*.md 文件
+        id: get_changed_files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "🔍 当前 GITHUB_SHA: $GITHUB_SHA"
+
+          # 获取前一次提交的SHA
+          PREVIOUS_SHA=$(git rev-parse HEAD~1)
+          echo "🔧 前一次提交 SHA: $PREVIOUS_SHA"
+
+          # 处理删除的文件 - 使用单独命令获取删除的文件
+          echo "📋 获取删除的文件..."
+          git diff --diff-filter=D --name-only $PREVIOUS_SHA $GITHUB_SHA | while read -r file; do
+            echo "检查删除文件: $file"
+            # 移除可能的引号
+            file=$(echo "$file" | sed 's/^"//;s/"$//')
+            # 解码转义序列
+            decoded_file=$(printf '%b' "$file")
+            echo "解码后的文件路径: $decoded_file"
+            
+            if [[ "$decoded_file" == issues/* && "$decoded_file" == *.md ]]; then
+              echo "🗑️ 检测到删除的md文件: $decoded_file"
+              # 保存到删除文件列表
+              echo "$decoded_file" >> /tmp/deleted_md_files.txt
+            fi
+          done
+          
+          # 如果删除文件列表存在，读取它
+          DELETED_MD_FILES=""
+          if [[ -f "/tmp/deleted_md_files.txt" ]]; then
+            DELETED_MD_FILES=$(cat /tmp/deleted_md_files.txt)
+          fi
+          echo "📂 删除的md文件: $DELETED_MD_FILES"
+          
+          # 检查是否有删除操作
+          DELETE_PERFORMED=false
+          
+          if [[ -n "$DELETED_MD_FILES" ]]; then
+            # 处理每个删除的文件
+            while IFS= read -r FILE; do
+              echo "🔍 处理删除的文件：$FILE"
+              
+              # 从文件名获取标题
+              FILENAME=$(basename "$FILE")
+              TITLE="${FILENAME%.md}"
+              echo "📋 从文件名提取标题：$TITLE"
+              
+              # 查找标题对应的issue
+              ISSUE_NUMBER=$(gh issue list --state all --search "$TITLE in:title" --json number,title | jq -r ".[] | select(.title==\"$TITLE\") | .number")
+              echo "查找issue结果: $ISSUE_NUMBER"
+              
+              if [[ -n "$ISSUE_NUMBER" ]]; then
+                echo "🗑️ 找到对应issue #$ISSUE_NUMBER，准备关闭..."
+                
+                # GitHub API不支持直接删除issue，改为使用gh CLI将issue关闭(不锁定)
+                echo "📌 关闭issue..."
+                gh issue close "$ISSUE_NUMBER" --reason "completed" --comment "此issue对应的文件已被删除，自动关闭。"
+                
+                echo "✅ 已完成issue #$ISSUE_NUMBER 的处理"
+                DELETE_PERFORMED=true
+              else
+                echo "⚠️ 未找到与'$TITLE'对应的issue，无需删除"
+              fi
+            done < <(echo "$DELETED_MD_FILES")
+          else
+            echo "✅ 没有删除任何md文件"
+          fi
+
+          # 获取本次提交中新增或修改的文件 - 使用单独命令获取新增或修改的文件
+          echo "📋 获取新增或修改的文件..."
+          git diff --diff-filter=AM --name-only $PREVIOUS_SHA $GITHUB_SHA | while read -r file; do
+            echo "检查新增/修改文件: $file"
+            # 移除可能的引号
+            file=$(echo "$file" | sed 's/^"//;s/"$//')
+            # 解码转义序列
+            decoded_file=$(printf '%b' "$file")
+            echo "解码后的文件路径: $decoded_file"
+            
+            if [[ "$decoded_file" == issues/* && "$decoded_file" == *.md ]]; then
+              echo "📝 检测到新增或修改的md文件: $decoded_file"
+              # 保存到修改文件列表
+              echo "$decoded_file" >> /tmp/modified_md_files.txt
+            fi
+          done
+          
+          # 如果修改文件列表存在，读取它
+          MODIFIED_MD_FILES=""
+          if [[ -f "/tmp/modified_md_files.txt" ]]; then
+            MODIFIED_MD_FILES=$(cat /tmp/modified_md_files.txt)
+          fi
+          echo "📂 新增或修改的md文件: $MODIFIED_MD_FILES"
+          
+          # 如果只执行了删除操作，并且没有任何新增或修改的md文件，则中止程序
+          if [[ "$DELETE_PERFORMED" == "true" && -z "$MODIFIED_MD_FILES" ]]; then
+            echo "✅ 已完成删除操作，没有新增或修改的md文件，中止程序"
+            echo "HAS_MD_FILES=false" >> $GITHUB_ENV
+            exit 0
+          fi
+          
+          # 如果没有需要处理的文件，则中止程序
+          if [[ -z "$MODIFIED_MD_FILES" ]]; then
+            echo "✅ 本次提交没有新增或修改的md文件，中止程序"
+            echo "HAS_MD_FILES=false" >> $GITHUB_ENV
+            exit 0
+          fi
+          
+          # 检查issues目录是否存在
+          if [[ ! -d "issues" ]]; then
+            echo "⚠️ issues目录不存在，可能已被删除"
+            echo "✅ 处理完毕，退出"
+            echo "HAS_MD_FILES=false" >> $GITHUB_ENV
+            exit 0
+          fi
+          
+          # 将新增或修改的md文件写入文件列表 - 确保文件真实存在
+          > /tmp/final_md_files.txt
+          while IFS= read -r file; do
+            if [[ -f "$file" ]]; then
+              echo "$file" >> /tmp/final_md_files.txt
+              echo "✅ 确认文件存在: $file"
+            else
+              echo "⚠️ 文件不存在，跳过: $file"
+            fi
+          done < <(echo "$MODIFIED_MD_FILES")
+          
+          # 检查最终文件列表是否为空
+          if [[ ! -s "/tmp/final_md_files.txt" ]]; then
+            echo "⚠️ 所有文件均不存在，中止程序"
+            echo "HAS_MD_FILES=false" >> $GITHUB_ENV
+            exit 0
+          fi
+          
+          # 设置环境变量指向文件列表
+          echo "ISSUES_FILES_LIST=/tmp/final_md_files.txt" >> $GITHUB_ENV
+          echo "HAS_MD_FILES=true" >> $GITHUB_ENV
+          echo "📂 本次将处理的md文件: $(cat /tmp/final_md_files.txt)"
+
+      - name: 📄 处理每个md文件
+        id: process_files
+        if: env.HAS_MD_FILES == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 检查文件列表是否存在
+          if [[ ! -f "${{ env.ISSUES_FILES_LIST }}" ]]; then
+            echo "❌ 文件列表不存在，跳过处理"
+            exit 0
+          fi
+          
+          # 检查文件列表是否为空
+          if [[ ! -s "${{ env.ISSUES_FILES_LIST }}" ]]; then
+            echo "❌ 文件列表为空，跳过处理"
+            exit 0
+          fi
+          
+          echo "📂 读取md文件列表: $(cat ${{ env.ISSUES_FILES_LIST }})"
+          
+          # 先获取当前仓库已有的所有标签
+          echo "📋 获取仓库现有标签..."
+          EXISTING_LABELS=$(gh label list --json name | jq -r '.[].name')
+          echo "📋 现有标签: $EXISTING_LABELS"
+          
+          # 遍历文件列表中的每个文件
+          while IFS= read -r FILE; do
+            echo "🔍 处理文件：$FILE"
+            
+            # 检查文件是否存在
+            if [[ ! -f "$FILE" ]]; then
+              echo "⚠️ 文件不存在：$FILE，跳过处理"
+              continue
+            fi
+            
+            # 从文件名获取标题（移除扩展名和路径）
+            FILENAME=$(basename "$FILE")
+            TITLE="${FILENAME%.md}"
+            echo "📋 从文件名提取标题：$TITLE"
+            
+            # 从文件内容获取标签
+            LABELS=$(grep -E '^ISSUE_LABELS:' "$FILE" | sed 's/^ISSUE_LABELS:[[:space:]]*//' || echo "文档")
+            
+            # 如果没有找到标签，使用默认标签
+            if [[ -z "$LABELS" ]]; then
+              LABELS="文档"
+            fi
+            echo "📋 提取标签：$LABELS"
+            
+            # 处理标签，将逗号分隔的标签转换为数组
+            LABEL_ARRAY=()
+            IFS=',' read -ra TEMP_ARRAY <<< "$LABELS"
+            for label in "${TEMP_ARRAY[@]}"; do
+              # 去除标签两端的空格
+              LABEL_ARRAY+=("$(echo "$label" | xargs)")
+            done
+            echo "📋 解析的标签：${LABEL_ARRAY[*]}"
+            
+            # 确保标签在仓库中存在
+            for label in "${LABEL_ARRAY[@]}"; do
+              if ! echo "$EXISTING_LABELS" | grep -q "^$label$"; then
+                echo "🏷️ 创建新标签: $label"
+                # 创建标签，使用随机颜色
+                COLORS=("fc8403" "2cbe4e" "0075ca" "d73a4a" "6f42c1" "fbca04" "b60205" "5319e7" "0e8a16" "1d76db" "c5def5" "bfdadc")
+                RANDOM_COLOR=${COLORS[$((RANDOM % ${#COLORS[@]}))]}
+                gh label create "$label" --color "$RANDOM_COLOR" || true
+              else
+                echo "🏷️ 标签已存在: $label"
+              fi
+            done
+            
+            # 从文件中提取正文内容（跳过标签行）
+            # 将内容保存到临时文件，避免Shell命令注入和特殊字符问题
+            grep -v '^ISSUE_LABELS:' "$FILE" > /tmp/issue_body.md
+            echo "📋 提取正文内容长度：$(wc -c < /tmp/issue_body.md) 字节"
+
+            # 检查是否已有同名 issue
+            ISSUE_NUMBER=$(gh issue list --state all --search "$TITLE in:title" --json number,title,state | jq -r ".[] | select(.title==\"$TITLE\") | .number")
+            
+            # 如果找到 issue，则更新，否则创建新的 issue
+            if [[ -n "$ISSUE_NUMBER" ]]; then
+              # 获取issue状态
+              ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state | jq -r '.state')
+              echo "🔍 检查是否已有同名 issue: '$TITLE'，找到 issue number: $ISSUE_NUMBER，状态: $ISSUE_STATE"
+              
+              # 如果issue是关闭状态，先重新打开
+              if [[ "$ISSUE_STATE" == "CLOSED" ]]; then
+                echo "🔓 重新打开已关闭的issue #$ISSUE_NUMBER"
+                gh issue reopen "$ISSUE_NUMBER"
+              fi
+              
+              echo "♻️ 更新已存在的 issue #$ISSUE_NUMBER"
+              
+              # 更新issue内容
+              gh issue edit "$ISSUE_NUMBER" --body-file /tmp/issue_body.md
+              
+              # 获取issue现有标签
+              CURRENT_LABELS=$(gh issue view "$ISSUE_NUMBER" --json labels | jq -r '.labels[].name')
+              echo "🏷️ 现有标签: $CURRENT_LABELS"
+              
+              # 添加md文件中的新标签
+              echo "🏷️ 添加新标签..."
+              for label in "${LABEL_ARRAY[@]}"; do
+                # 检查标签是否已存在于issue中
+                if ! echo "$CURRENT_LABELS" | grep -q "^$label$"; then
+                  echo "🏷️ 添加新标签: $label"
+                  gh issue edit "$ISSUE_NUMBER" --add-label "$label"
+                else
+                  echo "🏷️ 标签已存在: $label"
+                fi
+              done
+            else
+              echo "🆕 创建新的 issue: $TITLE"
+              
+              # 创建一个临时文件包含标签参数
+              LABEL_PARAMS=""
+              for label in "${LABEL_ARRAY[@]}"; do
+                LABEL_PARAMS+=" --label \"$label\""
+              done
+              
+              # 使用body-file和标签创建issue
+              eval "gh issue create -t \"$TITLE\" --body-file /tmp/issue_body.md $LABEL_PARAMS"
+            fi
+
+            echo "✅ 完成：$TITLE"
+          done < "${{ env.ISSUES_FILES_LIST }}"
