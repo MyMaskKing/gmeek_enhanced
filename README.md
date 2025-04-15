@@ -46,9 +46,11 @@ Gmeek增强版是基于[原版Gmeek](https://github.com/Meekdai/Gmeek)的改进�
 - 1. 请选择要使用的config.json
 -  2.点击Action中的build Gmeek进行发布博客新的CSS和JS
    - ### Gmeek官方UI
-   - ![输入图片说明](/imgs/2025-04-15/UT4K8KuS5qwvCI9X.png)
-    - ### Gmeek增强版UI
-      ![输入图片说明](/imgs/2025-04-15/gXbN0nOW11PKtg5X.png)
+   - ![image](https://github.com/user-attachments/assets/85dd4e2b-d82a-45c4-8719-cdafab5a3172)
+
+   - ### Gmeek增强版UI
+   - ![image](https://github.com/user-attachments/assets/ddfd7e83-66a8-46f5-9153-f46809219710)
+
 
 
 ### 工作原理
