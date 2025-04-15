@@ -1,30 +1,24 @@
-# 爱捣鼓的小水木的博客（测试版） :link: https://MyMaskKing.github.io/testblog 
-### :page_facing_up: [2](https://MyMaskKing.github.io/testblog/tag.html) 
-### :speech_balloon: 0 
-### :hibiscus: 7950 
-### :alarm_clock: 2025-04-15 09:56:45 
-### Powered by :heart: [Gmeek](https://github.com/Meekdai/Gmeek)
+
+
+# Gmeek（增强版） :link: [https://github.com/MyMaskKing/gmeek_enhanced.git ]
 
 ## Gmeek增强版使用说明
 
 Gmeek增强版是基于[原版Gmeek](https://github.com/Meekdai/Gmeek)的改进版本，通过GitHub Actions实现了本地Markdown文件与GitHub Issues的双向自动同步，大大简化了博客内容管理流程。
 
-### 核心功能
-
-- **本地Markdown与Issues双向同步**：将本地`issues/`目录中的Markdown文件自动同步为GitHub Issues
-- **文件变更智能监控**：自动检测`issues/*.md`文件的新增、修改和删除
-- **标签自动管理**：从Markdown文件中提取标签信息并自动应用到Issues
-
 ### 使用方法
+> [!TIP]
+> 使用Gmeek增强版之前无比先阅读[# Gmeek快速上手](https://blog.meekdai.com/post/Gmeek-kuai-su-shang-shou.html)，这里只讲增强内容的用法。
 
 #### 1. 基础设置
 
-1. 克隆仓库到本地
-2. 确保`.github/workflows/issue-publisher.yml`工作流文件存在
-3. 在仓库根目录创建`issues`文件夹(如不存在)
+
+1. 点击[Gmeek增强版Template](https://github.com/new?template_name=gmeek_enhanced&template_owner=MyMaskKing)把仓库下载到自己的Github
+2. 在仓库根目录创建`issues`文件夹(如不存在)
 
 #### 2. 创建文章
-
+> [!NOTE]
+> 可以通过[StackEdit](https://stackedit.cn/)将Github的指定目录进行关联（可通过[我的博客](https://blog.mymaskking.dpdns.org/)找到具体方法,博客内有我的B站，抖音，油管等视频平台也可以找到相关视频）
 1. 在`issues/`目录下创建Markdown文件(如`my-first-post.md`)
 2. 文件名将自动成为Issue的标题
 3. 在文件开头可以定义标签：
@@ -46,6 +40,15 @@ Gmeek增强版是基于[原版Gmeek](https://github.com/Meekdai/Gmeek)的改进�
 1. 从`issues/`目录删除Markdown文件
 2. 推送更改到GitHub
 3. 系统会自动关闭对应的Issue
+
+## 内置Gmeek官方UI和Gmeek增强版UI
+- 1. 请选择要使用的static和config.json
+-  2.点击Action中的build Gmeek进行发布博客新的CSS和JS
+   - ### Gmeek官方UI
+   - ![输入图片说明](/imgs/2025-04-15/UT4K8KuS5qwvCI9X.png)
+    - ### Gmeek增强版UI
+      ![输入图片说明](/imgs/2025-04-15/gXbN0nOW11PKtg5X.png)
+
 
 ### 工作原理
 
