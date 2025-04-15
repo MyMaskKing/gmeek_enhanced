@@ -1,5 +1,6 @@
 
 
+
 # Gmeek（增强版） :link: [https://github.com/MyMaskKing/gmeek_enhanced.git ]
 
 ## Gmeek增强版使用说明
@@ -42,7 +43,7 @@ Gmeek增强版是基于[原版Gmeek](https://github.com/Meekdai/Gmeek)的改进�
 3. 系统会自动关闭对应的Issue
 
 ## 内置Gmeek官方UI和Gmeek增强版UI
-- 1. 请选择要使用的static和config.json
+- 1. 请选择要使用的config.json
 -  2.点击Action中的build Gmeek进行发布博客新的CSS和JS
    - ### Gmeek官方UI
    - ![输入图片说明](/imgs/2025-04-15/UT4K8KuS5qwvCI9X.png)
