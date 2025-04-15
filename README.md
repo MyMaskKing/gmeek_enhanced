@@ -7,8 +7,8 @@
 Gmeek增强版是基于[原版Gmeek](https://github.com/Meekdai/Gmeek)的改进版本，通过GitHub Actions实现了本地Markdown文件与GitHub Issues的双向自动同步，大大简化了博客内容管理流程。
 
 ### 使用方法
-> [!TIP]
-> 使用Gmeek增强版之前无比先阅读[# Gmeek快速上手](https://blog.meekdai.com/post/Gmeek-kuai-su-shang-shou.html)，这里只讲增强内容的用法。
+> [!CAUTION]
+> 使用Gmeek增强版之前务必先阅读[# Gmeek快速上手](https://blog.meekdai.com/post/Gmeek-kuai-su-shang-shou.html)，这里只讲增强内容的用法。
 
 #### 1. 基础设置
 
