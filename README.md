@@ -1,85 +1,70 @@
-
-
-
-# Gmeek（增强版） :link: [https://github.com/MyMaskKing/gmeek_enhanced.git ]
+# 爱捣鼓的小水木的博客（测试版） :link: https://MyMaskKing.github.io/testblog 
+### :page_facing_up: [2](https://MyMaskKing.github.io/testblog/tag.html) 
+### :speech_balloon: 0 
+### :hibiscus: 7950 
+### :alarm_clock: 2025-04-15 09:56:45 
+### Powered by :heart: [Gmeek](https://github.com/Meekdai/Gmeek)
 
 ## Gmeek增强版使用说明
 
-Gmeek增强版是基于[原版Gmeek](https://github.com/Meekdai/Gmeek)的改进版本，通过GitHub Actions实现了本地Markdown文件与GitHub Issues的双向自动同步，大大简化了博客内容管理流程。
+Gmeek增强版基于[Gmeek](https://github.com/Meekdai/Gmeek)，增加了`issue-publisher.yml`工作流，实现了从本地Markdown文件自动同步到GitHub Issues并生成博客的功能。
+
+### 主要功能增强
+
+1. **本地Markdown自动同步**：修改`issues/*.md`文件后自动同步到GitHub Issues
+2. **图片资源自动处理**：自动下载文章中的图片并转存到仓库，确保图片链接永久有效
+3. **双向同步**：
+   - 新增/修改`issues/*.md`文件 → 创建/更新对应的GitHub Issue
+   - 删除`issues/*.md`文件 → 关闭对应的GitHub Issue
+4. **智能处理**：
+   - 支持中文文件名（自动解码路径中的转义序列）
+   - 只处理当前提交中变更的文件
+   - 自动验证文件存在性
+5. **标签管理**：
+   - 从Markdown文件中提取标签（`ISSUE_LABELS:`行）
+   - 自动创建缺失的标签
+   - 更新时保留原有标签，只添加新标签
 
 ### 使用方法
-> [!CAUTION]
-> 使用Gmeek增强版之前务必先阅读[# Gmeek快速上手](https://blog.meekdai.com/post/Gmeek-kuai-su-shang-shou.html)，这里只讲增强内容的用法。
 
-#### 1. 基础设置
+1. **设置工作目录**：
+   - 将Git中的`issues/`目录链接到[StackEdit](https://stackedit.cn/)或其他Markdown编辑器
+   - 确保仓库根目录中存在`issues`文件夹
 
+2. **编写文章**：
+   - 在`issues/`文件夹下创建`.md`文件
+   - 文件名将作为Issue标题和博客文章标题
+   - 可选：在文件第一行添加标签定义：`ISSUE_LABELS: 标签1, 标签2, 标签3`
+   - 如果未指定标签，将使用默认标签"文档"
 
-1. 点击[Gmeek增强版Template](https://github.com/new?template_name=gmeek_enhanced&template_owner=MyMaskKing)把仓库下载到自己的Github
-2. 在仓库根目录创建`issues`文件夹(如不存在)
+3. **提交更改**：
+   - 将更改推送到GitHub仓库
+   - 工作流会自动检测`issues/*.md`文件的变更并处理
 
-#### 2. 创建文章
-> [!NOTE]
-> 可以通过[StackEdit](https://stackedit.cn/)将Github的指定目录进行关联（可通过[我的博客](https://blog.mymaskking.dpdns.org/)找到具体方法,博客内有我的B站，抖音，油管等视频平台也可以找到相关视频）
-1. 在`issues/`目录下创建Markdown文件(如`my-first-post.md`)
-2. 文件名将自动成为Issue的标题
-3. 在文件开头可以定义标签：
-   ```
-   ISSUE_LABELS: 技术, 教程, 心得
-   
-   这里开始是文章正文内容...
-   ```
-4. 保存文件并推送到GitHub
+4. **图片处理**：
+   - 文章中的图片会被自动下载并存储在`assets/images/文章名称/`目录下
+   - 图片链接会被自动更新为指向仓库中的图片
+   - 支持外部http链接图片、GitHub图片和相对路径图片
 
-#### 3. 更新文章
+5. **删除文章**：
+   - 从`issues/`目录删除`.md`文件并提交
+   - 对应的Issue会被自动关闭
+   - 对应的图片资源也会被清理
 
-1. 修改`issues/`目录下的Markdown文件
-2. 保存并推送到GitHub
-3. 系统会自动更新对应的Issue
+### Markdown文件格式示例
 
-#### 4. 删除文章
+```markdown
+ISSUE_LABELS: 技术, 教程, 前端
 
-1. 从`issues/`目录删除Markdown文件
-2. 推送更改到GitHub
-3. 系统会自动关闭对应的Issue
+# 我的文章标题
 
-## 内置Gmeek官方UI和Gmeek增强版UI
-- 1. 请选择要使用的config.json
--  2.点击Action中的build Gmeek进行发布博客新的CSS和JS
-   - ### Gmeek官方UI
-   - ![image](https://github.com/user-attachments/assets/85dd4e2b-d82a-45c4-8719-cdafab5a3172)
+这是文章内容...
 
-   - ### Gmeek增强版UI
-   - ![image](https://github.com/user-attachments/assets/ddfd7e83-66a8-46f5-9153-f46809219710)
+![图片描述](https://example.com/image.jpg)
+```
 
+### 工作流触发条件
 
+当`issues/*.md`文件有任何变更(新增、修改、删除)时，工作流会自动触发。
 
-### 工作原理
-
-`issue-publisher.yml`工作流在检测到`issues/*.md`文件变更时触发，执行以下任务：
-
-1. **变更检测**：识别新增、修改和删除的Markdown文件
-2. **智能处理**：
-   - 新增文件→创建新Issue
-   - 修改文件→更新对应Issue
-   - 删除文件→关闭对应Issue
-3. **标签管理**：
-   - 从文件提取标签(ISSUE_LABELS行)
-   - 自动创建不存在的标签
-   - 更新时保留原有标签
-4. **状态恢复**：当重新添加已删除的文件时，自动重新打开对应Issue
-
-### 特别说明
-
-- 文件名会用作Issue标题，选择有意义的文件名以便识别
-- 如果不指定标签，系统会应用默认的"文档"标签
-- 支持中文文件名(自动处理转义序列)
-- 删除文件不会真正删除Issue，而是将其关闭，方便日后恢复
-
-### 完整工作流
-
-1. 通过您喜欢的Markdown编辑器(如VS Code、Typora或[StackEdit](https://stackedit.cn/))编辑文章
-2. 将文件保存到`issues/`目录
-3. 推送到GitHub触发自动同步
-4. Gmeek根据Issues自动构建博客页面
-
-结合原版Gmeek的便捷性与增强版的本地编辑能力，您可以获得更加灵活高效的博客写作体验。
+更多信息请访问[Gmeek官方文档](https://github.com/Meekdai/Gmeek)。
