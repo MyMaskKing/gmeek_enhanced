@@ -1,12 +1,18 @@
 name: Publish Issues
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'issues/*.md'
 
+# 修改并发控制，确保每个提交都能被独立处理
+concurrency:
+  group: issue-publisher-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.after || github.event.before || github.sha }}
+  cancel-in-progress: false  # 不取消运行中的工作流，确保所有变更都被处理
+
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -17,28 +23,46 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 2  # 确保获取足够的历史记录比较变更
+          token: ${{ secrets.GITHUB_TOKEN }}  # 使用带写权限的token
 
-      - name: 📂 获取本次提交变更的 issues/*.md 文件
+      - name: 🔍 获取本次提交变更的 issues/*.md 文件
         id: get_changed_files
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # 设置Git身份，确保所有操作都有正确的身份
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
           echo "🔍 当前 GITHUB_SHA: $GITHUB_SHA"
-
-          # 获取前一次提交的SHA
-          PREVIOUS_SHA=$(git rev-parse HEAD~1)
-          echo "🔧 前一次提交 SHA: $PREVIOUS_SHA"
-
-          # 处理删除的文件 - 使用单独命令获取删除的文件
+          
+          # 获取触发此工作流的提交SHA
+          TRIGGER_SHA="${{ github.event.before }}"
+          if [[ -z "$TRIGGER_SHA" || "$TRIGGER_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            # 如果before为空或者是初始提交，使用HEAD~1
+            TRIGGER_SHA=$(git rev-parse HEAD~1)
+          fi
+          echo "🔧 触发此工作流的提交 SHA: $TRIGGER_SHA"
+          echo "🔧 当前提交 SHA: $GITHUB_SHA"
+          
+          # 从触发提交中直接获取变更文件，而不依赖之前的提交
+          echo "📋 获取本次触发提交中变更的文件..."
+          echo "$ git diff --name-status $TRIGGER_SHA $GITHUB_SHA"
+          CHANGED_FILES=$(git diff --name-status $TRIGGER_SHA $GITHUB_SHA)
+          echo "变更文件列表："
+          echo "$CHANGED_FILES"
+          
+          # 处理删除的文件 - 使用文件状态信息来分类
           echo "📋 获取删除的文件..."
-          git diff --diff-filter=D --name-only $PREVIOUS_SHA $GITHUB_SHA | while read -r file; do
+          echo "$CHANGED_FILES" | grep "^D" | awk '{print $2}' | while read -r file; do
             echo "检查删除文件: $file"
             # 移除可能的引号
             file=$(echo "$file" | sed 's/^"//;s/"$//')
-            # 解码转义序列
+            # 解码转义序列，确保中文文件名能正确显示
             decoded_file=$(printf '%b' "$file")
             echo "解码后的文件路径: $decoded_file"
             
+            # 安全检查文件路径
             if [[ "$decoded_file" == issues/* && "$decoded_file" == *.md ]]; then
               echo "🗑️ 检测到删除的md文件: $decoded_file"
               # 保存到删除文件列表
@@ -82,21 +106,60 @@ jobs:
               else
                 echo "⚠️ 未找到与'$TITLE'对应的issue，无需删除"
               fi
+              
+              # 处理图片目录
+              # 获取文件名（不含扩展名）作为目录名
+              FILE_BASE=$(basename "$FILE" .md)
+              # 保留原始文件名，但替换不安全的字符为下划线
+              FILE_DIR_NAME=$(echo "$FILE_BASE" | sed 's/[\/\?<>\\:\*\|":]/_/g')
+              IMG_DIR="assets/images/$FILE_DIR_NAME"
+              
+              if [[ -d "$IMG_DIR" ]]; then
+                echo "🗑️ 删除图片目录: $IMG_DIR"
+                git rm -rf "$IMG_DIR" || echo "⚠️ 删除目录失败: $IMG_DIR"
+              else
+                echo "👀 图片目录不存在: $IMG_DIR"
+              fi
             done < <(echo "$DELETED_MD_FILES")
+            
+            # 如果有图片变动，提交并推送
+            if git status --porcelain | grep -q "assets/images/"; then
+              echo "🚀 提交图片删除更改..."
+              git commit -m "🗑️ 删除不再使用的图片 [skip ci] [skip gmeek]"
+              
+              echo "🚀 准备推送到GitHub..."
+              # 在推送前检查当前的更改内容
+              echo "📂 当前的更改文件列表:"
+              git status --porcelain
+              
+              # 在推送前确保拉取最新代码，处理潜在的冲突
+              echo "🔄 推送前再次拉取最新更改..."
+              git pull --no-rebase
+              
+              echo "🚀 推送到GitHub..."
+              git push || {
+                echo "⚠️ 推送失败，尝试强制推送..."
+                git push --force || echo "⚠️ 强制推送也失败，可能需要手动处理冲突"
+              }
+            else
+              echo "ℹ️ 没有图片需要删除"
+            fi
           else
             echo "✅ 没有删除任何md文件"
           fi
 
-          # 获取本次提交中新增或修改的文件 - 使用单独命令获取新增或修改的文件
+          # 获取本次提交中新增或修改的文件
           echo "📋 获取新增或修改的文件..."
-          git diff --diff-filter=AM --name-only $PREVIOUS_SHA $GITHUB_SHA | while read -r file; do
+          echo "$CHANGED_FILES" | grep -E "^[AM]" | awk '{print $2}' | while read -r file; do
             echo "检查新增/修改文件: $file"
+            
             # 移除可能的引号
             file=$(echo "$file" | sed 's/^"//;s/"$//')
-            # 解码转义序列
+            # 解码转义序列，确保中文文件名能正确显示
             decoded_file=$(printf '%b' "$file")
             echo "解码后的文件路径: $decoded_file"
             
+            # 安全检查文件路径
             if [[ "$decoded_file" == issues/* && "$decoded_file" == *.md ]]; then
               echo "📝 检测到新增或修改的md文件: $decoded_file"
               # 保存到修改文件列表
@@ -111,17 +174,18 @@ jobs:
           fi
           echo "📂 新增或修改的md文件: $MODIFIED_MD_FILES"
           
-          # 如果只执行了删除操作，并且没有任何新增或修改的md文件，则中止程序
-          if [[ "$DELETE_PERFORMED" == "true" && -z "$MODIFIED_MD_FILES" ]]; then
-            echo "✅ 已完成删除操作，没有新增或修改的md文件，中止程序"
+          # 如果只执行了删除操作，并且没有任何新增或修改的md文件，则标记为只处理删除
+          if [[ "$DELETE_PERFORMED" == "true" && -z "$DELETED_MD_FILES" && -z "$MODIFIED_MD_FILES" ]]; then
+            echo "✅ 已完成删除操作，没有新增或修改的md文件，只执行图片清理"
+            echo "ONLY_HANDLE_DELETIONS=true" >> $GITHUB_ENV
             echo "HAS_MD_FILES=false" >> $GITHUB_ENV
-            exit 0
           fi
           
           # 如果没有需要处理的文件，则中止程序
-          if [[ -z "$MODIFIED_MD_FILES" ]]; then
-            echo "✅ 本次提交没有新增或修改的md文件，中止程序"
+          if [[ -z "$DELETED_MD_FILES" && -z "$MODIFIED_MD_FILES" ]]; then
+            echo "✅ 本次提交没有新增、修改或删除的md文件，中止程序"
             echo "HAS_MD_FILES=false" >> $GITHUB_ENV
+            echo "ONLY_HANDLE_DELETIONS=false" >> $GITHUB_ENV
             exit 0
           fi
           
@@ -155,6 +219,442 @@ jobs:
           echo "ISSUES_FILES_LIST=/tmp/final_md_files.txt" >> $GITHUB_ENV
           echo "HAS_MD_FILES=true" >> $GITHUB_ENV
           echo "📂 本次将处理的md文件: $(cat /tmp/final_md_files.txt)"
+          
+          # 现在再拉取最新代码，确保后续操作基于最新代码
+          echo "🔄 拉取最新的远程更改..."
+          git pull --no-rebase
+          echo "📋 拉取后的状态:"
+          git status
+
+      # 新增：处理Markdown文件中的图片链接
+      - name: 🖼️ 处理MD文件中的图片链接
+        id: process_images
+        if: env.HAS_MD_FILES == 'true' || env.ONLY_HANDLE_DELETIONS == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 安装必要的工具
+          echo "📌 安装所需工具..."
+          sudo apt-get update && sudo apt-get install -y curl jq
+
+          # 检查环境变量
+          echo "👀 检查环境变量:"
+          echo "  GITHUB_REPOSITORY: $GITHUB_REPOSITORY"
+          echo "  GITHUB_TOKEN (长度): ${#GH_TOKEN}"
+          echo "  GITHUB_SHA: $GITHUB_SHA"
+          echo "  ONLY_HANDLE_DELETIONS: ${{ env.ONLY_HANDLE_DELETIONS }}"
+          
+          # 验证GitHub CLI是否可用
+          echo "👀 验证GitHub CLI:"
+          gh --version
+          
+          # 确保issue权限
+          echo "👀 确认当前权限范围:"
+          gh auth status || echo "⚠️ 无法获取权限状态"
+
+          # 确保Git配置正确
+          echo "👀 检查Git用户配置..."
+          git config --get user.name || echo "⚠️ 未设置Git用户名"
+          git config --get user.email || echo "⚠️ 未设置Git邮箱"
+          
+          # 检查是否只处理删除
+          if [[ "${{ env.ONLY_HANDLE_DELETIONS }}" == "true" ]]; then
+            echo "🧹 只处理删除操作的图片清理..."
+            
+            # 读取被删除的文件列表
+            if [[ -f "/tmp/deleted_md_files.txt" ]]; then
+              echo "📋 处理删除的文件列表..."
+              
+              while IFS= read -r FILE; do
+                echo "🔍 处理删除的文件：$FILE"
+                
+                # 获取文件名（不含扩展名）作为目录名
+                FILE_BASE=$(basename "$FILE" .md)
+                # 保留原始文件名，但替换不安全的字符为下划线
+                FILE_DIR_NAME=$(echo "$FILE_BASE" | sed 's/[\/\?<>\\:\*\|":]/_/g')
+                IMG_DIR="assets/images/$FILE_DIR_NAME"
+                
+                if [[ -d "$IMG_DIR" ]]; then
+                  echo "🗑️ 删除图片目录: $IMG_DIR"
+                  git rm -rf "$IMG_DIR" || echo "⚠️ 删除目录失败: $IMG_DIR"
+                else
+                  echo "👀 图片目录不存在: $IMG_DIR"
+                fi
+              done < "/tmp/deleted_md_files.txt"
+              
+              # 如果有图片变动，提交并推送
+              if git status --porcelain | grep -q "assets/images/"; then
+                echo "🚀 提交图片删除更改..."
+                git commit -m "🗑️ 删除不再使用的图片 [skip ci] [skip gmeek]"
+                
+                echo "🚀 准备推送到GitHub..."
+                # 在推送前确保拉取最新代码，处理潜在的冲突
+                echo "🔄 推送前再次拉取最新更改..."
+                git pull --no-rebase
+                
+                echo "🚀 推送到GitHub..."
+                git push || {
+                  echo "⚠️ 推送失败，尝试强制推送..."
+                  git push --force || echo "⚠️ 强制推送也失败，可能需要手动处理冲突"
+                }
+              else
+                echo "ℹ️ 没有图片需要删除"
+              fi
+            else
+              echo "⚠️ 删除文件列表不存在，无法清理图片"
+            fi
+            
+            echo "✅ 删除操作的图片清理完成"
+            exit 0
+          fi
+          
+          # 处理每个需要更新的Markdown文件（仅当前提交的文件）
+          while IFS= read -r FILE; do
+            echo "🔍 处理当前提交的文件：$FILE"
+            
+            # 获取文件名（不含扩展名）作为目录名
+            FILE_BASE=$(basename "$FILE" .md)
+            # 保留原始文件名，但替换不安全的字符为下划线
+            FILE_DIR_NAME=$(echo "$FILE_BASE" | sed 's/[\/\?<>\\:\*\|":]/_/g')
+            echo "👀 为文件创建图片目录: $FILE_DIR_NAME (源自: $FILE_BASE)"
+            
+            # 创建/清空图片目录 - 实现全量更新
+            IMG_DIR="assets/images/$FILE_DIR_NAME"
+            if [[ -d "$IMG_DIR" ]]; then
+              echo "🧹 清空现有图片目录，准备全量更新: $IMG_DIR"
+              rm -rf "$IMG_DIR"/*
+            fi
+            
+            # 确保图片目录存在
+            mkdir -p "$IMG_DIR"
+            
+            echo "📂 此文件的图片将保存在目录: $IMG_DIR (独立于其他MD文件)"
+            
+            # 创建临时文件
+            TMP_FILE=$(mktemp)
+            echo "👀 临时文件路径: $TMP_FILE"
+            
+            # 复制原始文件内容到临时文件
+            cp "$FILE" "$TMP_FILE"
+            echo "👀 原始文件大小: $(wc -c < "$FILE") 字节"
+            
+            # 使用正则表达式查找所有图片链接 - 包括GitHub和外部链接
+            echo "👀 开始查找所有图片链接..."
+            ALL_IMAGES=$(grep -oE '!\[[^]]*\]\([^)]+\)|!\[\]\([^)]+\)' "$FILE" || echo "")
+            
+            echo "👀 找到图片链接数量: $(echo "$ALL_IMAGES" | grep -c '^' || echo 0)"
+            
+            # 分离GitHub链接和其他链接
+            GITHUB_IMAGES=$(echo "$ALL_IMAGES" | grep 'github.com\|githubusercontent.com' || echo "")
+            OTHER_IMAGES=$(echo "$ALL_IMAGES" | grep -v 'github.com\|githubusercontent.com' || echo "")
+            
+            echo "👀 GitHub图片链接数: $(echo "$GITHUB_IMAGES" | grep -c '^' || echo 0)"
+            echo "👀 其他图片链接数: $(echo "$OTHER_IMAGES" | grep -c '^' || echo 0)"
+            
+            # 处理已有的GitHub链接 - 下载到本地
+            if [[ -n "$GITHUB_IMAGES" ]]; then
+              echo "🖼️ 处理已有的GitHub图片链接..."
+              
+              echo "$GITHUB_IMAGES" | while read -r IMG_LINK; do
+                echo "👀 处理GitHub图片链接: $IMG_LINK"
+                
+                # 提取链接部分
+                IMG_URL=$(echo "$IMG_LINK" | grep -oE 'https://[^)]+')
+                
+                if [[ -n "$IMG_URL" ]]; then
+                  echo "📥 下载GitHub图片: $IMG_URL"
+                  
+                  # 获取文件名
+                  IMG_FILENAME=$(basename "$IMG_URL")
+                  
+                  # 创建临时图片文件
+                  IMG_TMP=$(mktemp)
+                  
+                  # 下载图片
+                  curl -L "$IMG_URL" -o "$IMG_TMP"
+                  
+                  if [[ -f "$IMG_TMP" && -s "$IMG_TMP" ]]; then
+                    # 复制到图片目录
+                    cp "$IMG_TMP" "$IMG_DIR/$IMG_FILENAME"
+                    echo "👀 保存GitHub图片到: $IMG_DIR/$IMG_FILENAME"
+                    
+                    # 生成新的GitHub格式图片URL
+                    REPO_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY"
+                    BRANCH="${GITHUB_REF#refs/heads/}"
+                    if [[ -z "$BRANCH" ]]; then
+                      BRANCH="main"
+                    fi
+                    NEW_IMG_URL="$REPO_URL/$BRANCH/assets/images/$FILE_DIR_NAME/$IMG_FILENAME"
+                    
+                    # 创建新的图片Markdown链接
+                    if [[ "$IMG_LINK" =~ !\[\] ]]; then
+                      NEW_IMG_LINK="![Image]($NEW_IMG_URL)"
+                    else
+                      ALT_TEXT=$(echo "$IMG_LINK" | sed -E 's/!\[([^]]*)\].*/\1/')
+                      NEW_IMG_LINK="![$ALT_TEXT]($NEW_IMG_URL)"
+                    fi
+                    
+                    # 替换原始链接
+                    perl -i -pe "s/\Q$IMG_LINK\E/$NEW_IMG_LINK/g" "$TMP_FILE" || {
+                      FILE_CONTENT=$(<"$TMP_FILE")
+                      echo "${FILE_CONTENT//"$IMG_LINK"/"$NEW_IMG_LINK"}" > "$TMP_FILE"
+                    }
+                  else
+                    echo "❌ GitHub图片下载失败，保留原始链接"
+                  fi
+                  
+                  # 删除临时图片文件
+                  rm -f "$IMG_TMP"
+                else
+                  echo "⚠️ 无法从GitHub链接提取URL: $IMG_LINK"
+                fi
+              done
+            fi
+            
+            # 处理其他图片链接（外部链接、相对路径等）
+            if [[ -n "$OTHER_IMAGES" ]]; then
+              echo "🖼️ 处理其他图片链接..."
+              
+              echo "$OTHER_IMAGES" | while read -r IMG_LINK; do
+                echo "👀 处理图片链接: $IMG_LINK"
+                
+                # 提取图片URL部分
+                URL_PART=$(echo "$IMG_LINK" | sed -E 's/!\[[^]]*\]\(([^)]+)\)/\1/')
+                
+                # 判断链接类型
+                if [[ "$URL_PART" =~ ^http[s]?:// ]]; then
+                  # 类型1: 外部HTTP链接
+                  echo "🌐 检测到外部HTTP链接: $URL_PART"
+                  
+                  # 创建临时图片文件
+                  IMG_TMP=$(mktemp)
+                  echo "👀 临时图片文件: $IMG_TMP"
+                  
+                  # 尝试下载图片，添加一些额外的HTTP头
+                  echo "👀 尝试下载图片(使用额外的HTTP头)..."
+                  curl -v -L \
+                    -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
+                    -H "Accept: image/webp,image/apng,image/*,*/*;q=0.8" \
+                    -H "Accept-Language: en-US,en;q=0.9" \
+                    -H "Referer: https://www.kdocs.cn/" \
+                    "$URL_PART" -o "$IMG_TMP" 2>&1 | grep -E "^>" || echo "curl详细输出获取失败"
+                  
+                  if [[ -f "$IMG_TMP" && -s "$IMG_TMP" ]]; then
+                    echo "👀 图片下载成功，文件大小: $(wc -c < "$IMG_TMP") 字节"
+                    echo "👀 查看图片类型..."
+                    file "$IMG_TMP" || echo "无法确定文件类型"
+                    
+                    # 确定图片类型和扩展名
+                    MIME_TYPE=$(file -b --mime-type "$IMG_TMP" || echo "image/jpeg")
+                    echo "👀 MIME类型: $MIME_TYPE"
+                    
+                    # 为上传的图片生成一个唯一名称
+                    FILE_HASH=$(md5sum "$IMG_TMP" | cut -d ' ' -f 1)
+                    FILENAME="img_${FILE_HASH:0:10}"
+                    
+                    case "$MIME_TYPE" in
+                      image/jpeg)
+                        EXT=".jpg"
+                        ;;
+                      image/png)
+                        EXT=".png"
+                        ;;
+                      image/gif)
+                        EXT=".gif"
+                        ;;
+                      image/webp)
+                        EXT=".webp"
+                        ;;
+                      *)
+                        EXT=".jpg"  # 默认扩展名
+                        ;;
+                    esac
+                    
+                    FILENAME="${FILENAME}${EXT}"
+                    echo "👀 生成文件名: $FILENAME"
+                    
+                    # 将图片存入该文件专属的目录
+                    IMAGE_PATH="$IMG_DIR/$FILENAME"
+                    cp "$IMG_TMP" "$IMAGE_PATH"
+                    echo "👀 复制图片到: $IMAGE_PATH"
+                    
+                    # 添加图片到Git
+                    echo "👀 添加图片到Git..."
+                    git add "$IMAGE_PATH"
+                    
+                    # 生成GitHub格式的图片URL
+                    REPO_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY"
+                    BRANCH="${GITHUB_REF#refs/heads/}"
+                    if [[ -z "$BRANCH" ]]; then
+                      BRANCH="main"  # 默认分支
+                    fi
+                    GITHUB_IMG_URL="$REPO_URL/$BRANCH/assets/images/$FILE_DIR_NAME/$FILENAME"
+                    echo "👀 生成GitHub图片URL: $GITHUB_IMG_URL"
+                    
+                    # 创建新的图片Markdown语法
+                    if [[ "$IMG_LINK" =~ !\[\] ]]; then
+                      NEW_IMG_LINK="![Image]($GITHUB_IMG_URL)"
+                    else
+                      # 提取原始Alt Text
+                      ALT_TEXT=$(echo "$IMG_LINK" | sed -E 's/!\[([^]]*)\].*/\1/')
+                      NEW_IMG_LINK="![$ALT_TEXT]($GITHUB_IMG_URL)"
+                    fi
+                    
+                    echo "👀 新的图片链接: $NEW_IMG_LINK"
+                    
+                    # 替换文件内容
+                    perl -i -pe "s/\Q$IMG_LINK\E/$NEW_IMG_LINK/g" "$TMP_FILE" || {
+                      echo "⚠️ Perl替换失败，尝试更简单的方法"
+                      FILE_CONTENT=$(<"$TMP_FILE")
+                      echo "${FILE_CONTENT//"$IMG_LINK"/"$NEW_IMG_LINK"}" > "$TMP_FILE"
+                    }
+                    
+                    echo "👀 替换后的文件大小: $(wc -c < "$TMP_FILE") 字节"
+                  else
+                    echo "❌ 图片下载失败或文件为空，保留原始链接"
+                  fi
+                  
+                  # 删除临时图片文件
+                  rm -f "$IMG_TMP"
+                  
+                elif [[ "$URL_PART" =~ ^/ ]]; then
+                  # 类型3: 相对路径，转换为完整的GitHub raw路径
+                  echo "🔄 检测到相对路径: $URL_PART"
+                  
+                  # 生成完整的GitHub raw URL
+                  REPO_URL="https://raw.githubusercontent.com/$GITHUB_REPOSITORY"
+                  BRANCH="${GITHUB_REF#refs/heads/}"
+                  if [[ -z "$BRANCH" ]]; then
+                    BRANCH="main"  # 默认分支
+                  fi
+                  GITHUB_IMG_URL="$REPO_URL/$BRANCH$URL_PART"
+                  echo "👀 转换为GitHub raw URL: $GITHUB_IMG_URL"
+                  
+                  # 创建新的图片Markdown语法
+                  if [[ "$IMG_LINK" =~ !\[\] ]]; then
+                    NEW_IMG_LINK="![Image]($GITHUB_IMG_URL)"
+                  else
+                    # 提取原始Alt Text
+                    ALT_TEXT=$(echo "$IMG_LINK" | sed -E 's/!\[([^]]*)\].*/\1/')
+                    NEW_IMG_LINK="![$ALT_TEXT]($GITHUB_IMG_URL)"
+                  fi
+                  
+                  echo "👀 新的图片链接: $NEW_IMG_LINK"
+                  
+                  # 替换文件内容
+                  perl -i -pe "s/\Q$IMG_LINK\E/$NEW_IMG_LINK/g" "$TMP_FILE" || {
+                    echo "⚠️ Perl替换失败，尝试更简单的方法"
+                    FILE_CONTENT=$(<"$TMP_FILE")
+                    echo "${FILE_CONTENT//"$IMG_LINK"/"$NEW_IMG_LINK"}" > "$TMP_FILE"
+                  }
+                  
+                  echo "👀 替换后的文件大小: $(wc -c < "$TMP_FILE") 字节"
+                else
+                  # 类型2: 无法解析的链接，保持原样
+                  echo "⚠️ 无法解析的链接，保持原样: $URL_PART"
+                fi
+              done
+            else
+              echo "ℹ️ 没有找到图片链接"
+            fi
+            
+            # 使用处理后的内容替换原始文件
+            echo "👀 更新原始文件..."
+            cp "$TMP_FILE" "$FILE"
+            echo "👀 更新后的文件大小: $(wc -c < "$FILE") 字节"
+            
+            # 添加整个图片目录到Git
+            if [[ -d "$IMG_DIR" ]]; then
+              echo "👀 添加图片目录到Git: $IMG_DIR"
+              git add "$IMG_DIR"
+            fi
+            
+            echo "✅ 图片处理完成: $FILE"
+            
+            # 删除临时文件
+            rm -f "$TMP_FILE"
+          done < "${{ env.ISSUES_FILES_LIST }}"
+          
+          # 如果有图片变动，提交并推送
+          if git status --porcelain | grep -q "assets/images/"; then
+            echo "🚀 提交图片更改..."
+            git commit -m "📝 更新图片资源 [skip ci] [skip gmeek]"
+            
+            echo "🚀 准备推送到GitHub..."
+            # 在推送前检查当前的更改内容
+            echo "📂 当前的更改文件列表:"
+            git status --porcelain
+            
+            # 在推送前确保拉取最新代码，处理潜在的冲突
+            echo "🔄 推送前再次拉取最新更改..."
+            git pull --no-rebase
+            
+            echo "🚀 推送到GitHub..."
+            git push || {
+              echo "⚠️ 推送失败，尝试强制推送..."
+              git push --force || echo "⚠️ 强制推送也失败，可能需要手动处理冲突"
+            }
+          else
+            echo "ℹ️ 没有图片需要提交"
+          fi
+
+          # 清理所有不再与Markdown文件关联的图片文件夹
+          echo "🧹 清理未使用的图片文件夹..."
+          # 确保图片主目录存在
+          if [[ -d "assets/images" ]]; then
+            # 获取所有图片文件夹
+            IMAGE_DIRS=$(find "assets/images" -type d -mindepth 1 -maxdepth 1)
+            
+            # 获取所有Markdown文件
+            ALL_MD_FILES=$(find issues -name "*.md" -type f)
+            
+            # 遍历所有图片文件夹
+            for IMG_DIR in $IMAGE_DIRS; do
+              DIR_NAME=$(basename "$IMG_DIR")
+              echo "👀 检查图片文件夹: $DIR_NAME"
+              
+              # 检查是否有对应的Markdown文件
+              FOUND=false
+              
+              for MD_FILE in $ALL_MD_FILES; do
+                FILE_BASE=$(basename "$MD_FILE" .md)
+                FILE_DIR_NAME=$(echo "$FILE_BASE" | sed 's/[\/\?<>\\:\*\|":]/_/g')
+                
+                if [[ "$FILE_DIR_NAME" == "$DIR_NAME" ]]; then
+                  FOUND=true
+                  echo "✅ 找到对应的Markdown文件: $MD_FILE"
+                  break
+                fi
+              done
+              
+              # 如果没有找到对应的Markdown文件，删除该文件夹
+              if [[ "$FOUND" == "false" ]]; then
+                echo "🗑️ 删除未使用的图片文件夹: $IMG_DIR"
+                git rm -rf "$IMG_DIR"
+              fi
+            done
+            
+            # 如果有图片变动，提交并推送
+            if git status --porcelain | grep -q "assets/images/"; then
+              echo "🚀 提交图片文件夹清理更改..."
+              git commit -m "🧹 清理未使用的图片文件夹 [skip ci] [skip gmeek]"
+              
+              echo "🚀 准备推送到GitHub..."
+              # 在推送前确保拉取最新代码，处理潜在的冲突
+              echo "🔄 推送前再次拉取最新更改..."
+              git pull --no-rebase
+              
+              echo "🚀 推送到GitHub..."
+              git push || {
+                echo "⚠️ 推送失败，尝试强制推送..."
+                git push --force || echo "⚠️ 强制推送也失败，可能需要手动处理冲突"
+              }
+            else
+              echo "ℹ️ 没有未使用的图片文件夹需要清理"
+            fi
+          else
+            echo "ℹ️ 图片主目录不存在，无需清理"
+          fi
 
       - name: 📄 处理每个md文件
         id: process_files
